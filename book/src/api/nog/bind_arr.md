@@ -22,6 +22,6 @@ fn bind_arr(modifier: String, callback: (), arr: Any[], always_active: Keybindin
 ## Example
 
 ```nogscript
- nog.bind_arr("Alt", nog.workspace.change, range(10))
+ nog.bind_arr("Alt", nog.workspace.change, range(10), "work")
 ```
 

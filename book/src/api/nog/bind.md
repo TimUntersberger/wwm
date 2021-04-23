@@ -21,6 +21,6 @@ fn bind(key_combo: String, callback: (), kind: KeybindingKind?) -> Void
 ## Example
 
 ```nogscript
- nog.bind("F1", () => print("Hello World"))
+ nog.bind("F1", () => print("Hello World"), "global")
 ```
 

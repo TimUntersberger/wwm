@@ -9,7 +9,7 @@ pub fn handle(
         .find_grid_containing_window(window.id)
         .map(|g| g.remove_by_window_id(window.id))
     {
-        state.get_current_display().refresh_grid(&state.config)?;
+        state.refresh_visible_grids()?;
     }
     Ok(())
 }

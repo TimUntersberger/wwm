@@ -31,7 +31,7 @@ use std::str::FromStr;
 use std::{mem, thread, time::Duration};
 use std::{process, sync::atomic::AtomicBool, sync::Arc};
 use system::NativeWindow;
-use system::{DisplayId, SystemResult, WinEventListener, WindowId};
+use system::{DisplayId, SystemResult, SystemError, WinEventListener, WindowId};
 use task_bar::Taskbar;
 use tile_grid::{store::Store, TileGrid};
 use win_event_handler::{win_event::WinEvent, win_event_type::WinEventType};
@@ -223,6 +223,8 @@ impl AppState {
             .focused_grid_id
             .and_then(|id| display.remove_grid_by_id(id))
         {
+            grid.hide();
+
             let config = self.config.clone();
             let new_display = self.get_display_by_idx_mut(monitor).unwrap();
             let id = grid.id;
@@ -231,6 +233,8 @@ impl AppState {
             new_display.focus_workspace(&config, id)?;
             self.workspace_id = id;
         }
+
+        self.refresh_visible_grids()?;
 
         Ok(())
     }
@@ -242,8 +246,10 @@ impl AppState {
         let current_id = self.workspace_id.clone();
         let current_grid_exists = self.get_current_grid().is_some();
         if is_empty && current_grid_exists && current_id != workspace_id {
+            Store::save(current_id, "".into());
             let mut empty_grid = TileGrid::new(current_id, renderer::NativeRenderer);
             let source = self.get_current_grid_mut().unwrap();
+            source.hide();
             source.id = workspace_id;
             mem::swap(source, &mut empty_grid);
             let target = self.get_grid_by_id_mut(workspace_id).unwrap();
@@ -255,6 +261,8 @@ impl AppState {
                 display.focus_workspace(&config, workspace_id)?;
                 self.workspace_id = workspace_id;
             }
+
+            self.refresh_visible_grids()?;
         }
 
         Ok(())
@@ -326,6 +334,8 @@ impl AppState {
             self.get_grid_by_id_mut(id).unwrap().push(window);
             self.change_workspace(id, false);
         });
+
+        self.refresh_visible_grids()?;
 
         Ok(())
     }
@@ -777,6 +787,22 @@ impl AppState {
 
     pub fn get_grid_by_id(&self, id: i32) -> Option<&TileGrid> {
         self.get_grids().into_iter().find(|g| g.id == id)
+    }
+
+    pub fn refresh_visible_grids(&mut self) -> SystemResult {
+        let config = self.config.clone();
+        self.displays
+            .iter_mut()
+            .map(|d| d.refresh_grid(&config))
+            .collect::<Result<(), SystemError>>()
+    }
+
+    pub fn refresh_current_grid(&mut self) -> SystemResult {
+        let config = self.config.clone();
+        let display = self.get_current_display_mut();
+        display.refresh_grid(&config)?;
+
+        Ok(())
     }
 }
 

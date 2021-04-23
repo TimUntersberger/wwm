@@ -27,6 +27,6 @@ fn bind_map(modifier: String, callback: (), map: Map<String,, always_active: Key
    "J": "Down",
    "K": "Up",
    "L": "Right"
- })
+ }, "work")
 ```
 

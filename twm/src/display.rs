@@ -146,6 +146,9 @@ impl Display {
     /// Returns true if the workspace was found and false if it wasn't
     pub fn focus_workspace(&mut self, config: &Config, id: i32) -> SystemResult<bool> {
         if let Some(grid) = self.get_grid_by_id_mut(id) {
+            if grid.fullscreen_id.is_some() {
+                grid.focused_id = grid.fullscreen_id;
+            }
             if !grid.focused_id.is_some() {
                 grid.focus_last_tile(); // ensures a tile is focused on the current grid
             }
