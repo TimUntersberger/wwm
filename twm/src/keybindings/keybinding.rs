@@ -74,9 +74,13 @@ impl FromStr for Keybinding {
             .iter()
             .take(modifier_count)
             .map(|x| match x.to_lowercase().as_str() {
-                "alt" => Modifier::ALT,
+                "alt" => Modifier::LALT,
+                "lalt" => Modifier::LALT,
+                "ralt" => Modifier::RALT,
                 "control" => Modifier::CONTROL,
+                "ctrl" => Modifier::CONTROL,
                 "shift" => Modifier::SHIFT,
+                "win" => Modifier::WIN,
                 _ => Modifier::default(),
             })
             .fold(Modifier::default(), |mut sum, crr| {

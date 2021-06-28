@@ -191,6 +191,11 @@ nog.components.current_window = function(max_width)
     name = "CurrentWindow",
     render = function(display_id)
       local win_id = nog.get_focused_win_of_display(display_id)
+
+      if not win_id then
+        return {{ text = "" }}
+      end
+      
       local title = win_id and nog.get_win_title(win_id) or ""
 
       if max_width ~= 0 then
@@ -209,6 +214,11 @@ nog.components.split_direction = function(values)
     name = "SplitDirection",
     render = function(display_id)
       local ws_id = nog.get_focused_ws_of_display(display_id)
+      
+      if not ws_id then
+        return {{ text = "" }}
+      end
+
       local info = nog.get_ws_info(ws_id)
 
       return {{
@@ -223,6 +233,11 @@ nog.components.fullscreen_indicator = function(indicator)
     name = "FullscreenIndicator",
     render = function(display_id)
       local ws_id = nog.get_focused_ws_of_display(display_id)
+
+      if not ws_id then
+        return {{ text = "" }}
+      end
+
       local info = nog.get_ws_info(ws_id)
 
       return {{

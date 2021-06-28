@@ -483,13 +483,7 @@ fn setup_nog_global(state_arc: Arc<Mutex<AppState>>, rt: &LuaRuntime) {
             "get_focused_ws_of_display",
             move |lua, display_id: Value| {
                 validate!(lua, { display_id: i32 });
-                state.lock()
-                     .get_focused_ws_of_display(display_id)
-                     .ok_or(
-                         LuaError::RuntimeError(
-                             format!("Display {} does not exist or doesn't have a focused workspace", display_id).to_string()
-                         )
-                     )
+                Ok(state.lock().get_focused_ws_of_display(display_id))
             }
         );
 
@@ -564,13 +558,7 @@ fn setup_nog_global(state_arc: Arc<Mutex<AppState>>, rt: &LuaRuntime) {
         let state = state_arc.clone();
         def_fn!(lua, nog_tbl, "get_focused_win_of_display", move |lua, display_id: Value| {
             validate!(lua, { display_id: i32 });
-            state.lock()
-                 .get_focused_win_of_display(display_id)
-                 .ok_or(
-                     LuaError::RuntimeError(
-                         format!("Display {} does not exist or doesn't have a focused window", display_id).to_string()
-                     )
-                 )
+            Ok(state.lock().get_focused_win_of_display(display_id))
         });
 
         let state = state_arc.clone();
@@ -603,9 +591,9 @@ fn setup_nog_global(state_arc: Arc<Mutex<AppState>>, rt: &LuaRuntime) {
                     state.config.keybindings.remove(i);
                 }
             }
-            if let Some(kbm) = state.keybindings_manager.as_ref() {
-                kbm.unregister_keybinding_batch(kbs);
-            }
+            let tx = state.event_channel.sender.clone();
+            drop(state);
+            tx.send(Event::UpdateKeybindings);
             Ok(())
         });
 
@@ -624,9 +612,9 @@ fn setup_nog_global(state_arc: Arc<Mutex<AppState>>, rt: &LuaRuntime) {
                 .map(|(i, kb)| (i, kb.clone()))
             {
                 state_g.config.keybindings.remove(i);
-                if let Some(kbm) = state_g.keybindings_manager.as_ref() {
-                    kbm.unregister_keybinding(kb);
-                }
+                let tx = state_g.event_channel.sender.clone();
+                drop(state_g);
+                tx.send(Event::UpdateKeybindings);
             }
 
             Ok(())
@@ -648,9 +636,9 @@ fn setup_nog_global(state_arc: Arc<Mutex<AppState>>, rt: &LuaRuntime) {
             for kb in &kbs {
                 state.config.keybindings.push(kb.clone());
             }
-            if let Some(kbm) = state.keybindings_manager.as_ref() {
-                kbm.register_keybinding_batch(kbs);
-            }
+            let tx = state.event_channel.sender.clone();
+            drop(state);
+            tx.send(Event::UpdateKeybindings);
             Ok(())
         });
 
@@ -676,9 +664,9 @@ fn setup_nog_global(state_arc: Arc<Mutex<AppState>>, rt: &LuaRuntime) {
             kb.callback_id = id;
             let mut state = state.lock();
             state.config.keybindings.push(kb.clone());
-            if let Some(kbm) = state.keybindings_manager.as_ref() {
-                kbm.register_keybinding(kb);
-            }
+            let tx = state.event_channel.sender.clone();
+            drop(state);
+            tx.send(Event::UpdateKeybindings);
             Ok(())
         });
 

@@ -5,29 +5,24 @@ extern crate num_derive;
 #[macro_use]
 extern crate strum_macros;
 
-use bar::component::{self, Component, ComponentText};
-use config::{bar_config::BarConfig, rule::Rule, workspace_setting::WorkspaceSetting, Config};
+use config::{rule::Rule, workspace_setting::WorkspaceSetting, Config};
 use crossbeam_channel::select;
 use direction::Direction;
 use display::Display;
 use event::Event;
 use event::EventChannel;
-use hot_reload::update_config;
 use itertools::Itertools;
-use keybindings::{keybinding::Keybinding, keybinding::KeybindingKind, KbManager};
+use keybindings::{keybinding::Keybinding, KeybindingsMessage, keybinding::KeybindingKind};
 use log::debug;
 use log::{error, info};
 use lua::{setup_lua_rt, LuaRuntime};
 use parking_lot::{deadlock, Mutex};
-use popup::Popup;
-use regex::Regex;
 use split_direction::SplitDirection;
 use std::path::PathBuf;
 use std::process::Command;
-use std::str::FromStr;
-use std::{fmt::Debug, fs::ReadDir, path::Path};
+use std::{fmt::Debug, fs::ReadDir};
 use std::{mem, thread, time::Duration};
-use std::{process, sync::atomic::AtomicBool, sync::Arc};
+use std::{process, sync::Arc};
 use system::NativeWindow;
 use system::{DisplayId, SystemResult, WinEventListener, WindowId};
 use task_bar::Taskbar;
@@ -120,8 +115,8 @@ mod direction;
 mod display;
 mod event;
 mod event_handler;
-mod hot_reload;
 mod keybindings;
+mod keyboardhook;
 mod logging;
 mod lua;
 mod message_loop;
@@ -147,7 +142,6 @@ pub struct AppState {
     pub work_mode: bool,
     pub displays: Vec<Display>,
     pub event_channel: EventChannel,
-    pub keybindings_manager: Option<KbManager>,
     pub additonal_rules: Vec<Rule>,
     pub window_event_listener: WinEventListener,
     pub workspace_id: i32,
@@ -160,7 +154,6 @@ impl Default for AppState {
             work_mode: true,
             lua_rt: LuaRuntime::new(),
             displays: time!("initializing displays", display::init(&config)),
-            keybindings_manager: None,
             event_channel: EventChannel::default(),
             additonal_rules: Vec::new(),
             window_event_listener: WinEventListener::default(),
@@ -174,7 +167,6 @@ impl AppState {
     pub fn init(&mut self, state_arc: Arc<Mutex<AppState>>) {
         self.work_mode = self.config.work_mode;
         self.displays = display::init(&self.config);
-        self.keybindings_manager = Some(KbManager::new(state_arc, self.config.allow_right_alt));
     }
 
     /// TODO: maybe rename this function
@@ -521,19 +513,22 @@ impl AppState {
         info!("Registering windows event handler");
         this.window_event_listener.start(&this.event_channel);
 
-        let kb = this.keybindings_manager.as_ref().unwrap().clone();
+        let tx = this.event_channel.sender.clone();
 
         drop(this);
 
-        kb.enter_work_mode();
+        tx.send(Event::UpdateKeybindings);
 
         Ok(())
     }
 
     pub fn leave_work_mode(state_arc: Arc<Mutex<AppState>>) -> SystemResult {
         let mut this = state_arc.lock();
+        let tx = this.event_channel.sender.clone();
+        tx.send(Event::UpdateKeybindings);
+        drop(this);
+        let mut this = state_arc.lock();
         this.window_event_listener.stop();
-        this.keybindings_manager.as_ref().unwrap().leave_work_mode();
 
         popup::cleanup()?;
 
@@ -977,12 +972,7 @@ fn run(state_arc: Arc<Mutex<AppState>>) -> Result<(), Box<dyn std::error::Error>
     os_specific_setup(state_arc.clone());
 
     info!("Listening for keybindings");
-    state_arc
-        .lock()
-        .keybindings_manager
-        .as_ref()
-        .unwrap()
-        .start(state_arc.clone());
+    let kb_tx = keybindings::listen(state_arc.clone());
 
     if state_arc.lock().config.work_mode {
         AppState::enter_work_mode(state_arc.clone())?;
@@ -1016,9 +1006,13 @@ fn run(state_arc: Arc<Mutex<AppState>>) -> Result<(), Box<dyn std::error::Error>
                         }
                         Ok(())
                     },
+                    Event::UpdateKeybindings => {
+                        kb_tx.send(KeybindingsMessage::UpdateKeybindings);
+                        Ok(())
+                    }
                     Event::Keybinding(kb) => {
                         debug!("Received keybinding {:?}", kb);
-                        sender.send(Event::CallCallback { idx: kb.callback_id, is_mode_callback: false } ).unwrap();
+                        sender.send(Event::CallCallback { idx: kb.callback_id } ).unwrap();
                         Ok(())
                     },
                     Event::LuaRuntimeError(err) => {
@@ -1026,7 +1020,7 @@ fn run(state_arc: Arc<Mutex<AppState>>) -> Result<(), Box<dyn std::error::Error>
 
                         Ok(())
                     }
-                    Event::CallCallback { idx, is_mode_callback } => {
+                    Event::CallCallback { idx } => {
                         let rt = state_arc.lock().lua_rt.clone();
                         let res = rt.with_lua(|lua| {
                             LuaRuntime::get_callback(lua, idx)?.call::<_, ()>(())
@@ -1034,8 +1028,6 @@ fn run(state_arc: Arc<Mutex<AppState>>) -> Result<(), Box<dyn std::error::Error>
 
                         if let Err(e) = res {
                             sender.send(Event::LuaRuntimeError(e));
-                        } else if is_mode_callback {
-                            state_arc.lock().keybindings_manager.as_ref().map(|x| x.sender.clone()).unwrap().send(keybindings::ChanMessage::ModeCbExecuted);
                         }
 
                         Ok(())

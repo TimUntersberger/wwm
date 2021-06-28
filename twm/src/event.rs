@@ -1,5 +1,5 @@
 use crate::{
-    bar::item_section::ItemSection, keybindings::keybinding::Keybinding, popup::Popup,
+    keyboardhook::InputEvent, bar::item_section::ItemSection, keybindings::keybinding::Keybinding, popup::Popup,
     system::DisplayId, win_event_handler::win_event::WinEvent,
 };
 use crossbeam_channel::unbounded;
@@ -12,13 +12,10 @@ pub enum Event {
     Keybinding(Keybinding),
     WinEvent(WinEvent),
     NewPopup(Popup),
+    UpdateKeybindings,
     LuaRuntimeError(LuaError),
     CallCallback {
-        idx: usize,
-        /// This is required, because the callbacks run in a seperate thread and mode callbacks
-        /// have to notify the keybindings manager that they finished executing so it can register
-        /// all of the mode specific bindings
-        is_mode_callback: bool,
+        idx: usize
     },
     ToggleAppbar(DisplayId),
     UpdateBarSections(DisplayId, ItemSection, ItemSection, ItemSection),
