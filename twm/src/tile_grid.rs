@@ -15,6 +15,7 @@ use crate::{
 };
 use log::{debug, error, info};
 use std::cmp;
+use std::collections::HashMap;
 
 pub mod graph_wrapper;
 pub mod node;
@@ -38,6 +39,7 @@ pub struct TileGrid<TRenderer: Renderer = NativeRenderer> {
     //       as opposed to the current way where it always adds below/after
     pub next_direction: Direction,
     graph: GraphWrapper,
+    pub pinned_windows: HashMap<i32, NativeWindow>,
 }
 
 impl TileGrid {
@@ -263,6 +265,7 @@ impl<TRenderer: Renderer> TileGrid<TRenderer> {
             focused_id: None,
             next_axis: SplitDirection::Vertical,
             next_direction: Direction::Right,
+            pinned_windows: HashMap::new(),
         }
     }
     /// Returns whether the tile grid is populated or not

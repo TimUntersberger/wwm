@@ -34,6 +34,7 @@ use task_bar::Taskbar;
 use tile_grid::{store::Store, TileGrid};
 use win_event_handler::{win_event::WinEvent, win_event_type::WinEventType};
 use window::Window;
+use std::collections::HashMap;
 
 pub const NOG_BAR_NAME: &'static str = "nog_bar";
 pub const NOG_POPUP_NAME: &'static str = "nog_popup";
@@ -150,6 +151,7 @@ pub struct AppState {
     pub additonal_rules: Vec<Rule>,
     pub window_event_listener: WinEventListener,
     pub workspace_id: i32,
+    pub pinned_windows: HashMap<i32, NativeWindow>,
 }
 
 impl Default for AppState {
@@ -165,6 +167,7 @@ impl Default for AppState {
             window_event_listener: WinEventListener::default(),
             workspace_id: 1,
             config,
+            pinned_windows: HashMap::new(),
         }
     }
 }
@@ -180,6 +183,15 @@ impl AppState {
     pub fn cleanup(&mut self) -> SystemResult {
         for d in self.displays.iter_mut() {
             d.cleanup(self.config.remove_task_bar)?;
+        }
+
+        for w in self.pinned_windows.values_mut() {
+            if w.is_hidden() {
+                w.show();
+            }
+
+            w.remove_topmost()?;
+            w.cleanup()?;
         }
 
         Ok(())
@@ -498,12 +510,13 @@ impl AppState {
         let mut focused_workspaces = Vec::<i32>::new();
         let remove_title_bar = this.config.remove_title_bar;
         let use_border = this.config.use_border;
-        let stored_grids: Vec<String> = Store::load();
+        let stored_data = Store::load();
+
         let rules = this.config.rules.clone();
         let additional_rules = this.additonal_rules.clone();
         for display in this.displays.iter_mut() {
             for grid in display.grids.iter_mut() {
-                if let Some(stored_grid) = stored_grids.get((grid.id - 1) as usize) {
+                if let Some(stored_grid) = stored_data.grids.get((grid.id - 1) as usize) {
                     grid.from_string(stored_grid);
                     Store::save(grid.id, grid.to_string());
 
@@ -535,6 +548,30 @@ impl AppState {
             // otherwise just focus first workspace
             this.change_workspace(1, false)?;
         }
+
+        this.load_pinned(stored_data.pinned_windows)?;
+
+        let mut pinned_windows = this.pinned_windows.clone();
+        for w in pinned_windows.values_mut() {
+            if !stored_data.are_pinned_visible {
+                debug!("HIDING");
+                w.hide();
+            } else {
+                debug!("SHOWING");
+                w.show();
+            }
+
+            let rules = this.config
+                .rules
+                .iter()
+                .chain(this.additonal_rules.iter())
+                .collect();
+
+            w.set_matching_rule(rules);
+            w.init(false, this.config.use_border)?;
+            w.to_foreground(true)?;
+        }
+        this.store_pinned();
 
         info!("Registering windows event handler");
         this.window_event_listener.start(&this.event_channel);
@@ -687,12 +724,74 @@ impl AppState {
         Ok(())
     }
 
+   pub fn toggle_view_pinned(&mut self) -> SystemResult {
+        let pinned_visible = self.pinned_windows.values().any(|w| w.is_visible());
+        if pinned_visible {
+            self.pinned_windows.values_mut().for_each(|w| w.hide());
+
+            let current_id = self.workspace_id.clone();
+            let config = self.config.clone();
+            if let Some(display) = self.find_grid_display_mut(current_id) {
+                display.focus_workspace(&config, current_id)?;
+            }
+        } else {
+            self.pinned_windows.values_mut().for_each(|w| {
+                w.show();
+                w.focus();
+            });
+        }
+
+        self.store_pinned();
+
+        Ok(())
+    }
+
+    pub fn toggle_pin(&mut self) -> SystemResult {
+        let window = NativeWindow::get_foreground_window().expect("Failed to get foreground window");
+
+        if self.pinned_windows.contains_key(&window.id.into()) {
+            let mut window = self.pinned_windows.remove(&window.id.into()).unwrap();
+            window.remove_topmost()?;
+            window.cleanup()?;
+        } else {
+            self.pin_window(window.id.into())?;
+        }
+
+        self.store_pinned();
+
+        Ok(())
+    }
+
+    pub fn pin_window(&mut self, window_id: i32) -> SystemResult {
+        let config = self.config.clone();
+        let window_id: WindowId = window_id.into();
+        let mut window: NativeWindow = NativeWindow::from(window_id);
+
+        let grid = self.find_grid_containing_window(window_id);
+        if !grid.is_some() && window.is_window() { // don't pin if window is being managed
+            let rules = config
+                .rules
+                .iter()
+                .chain(self.additonal_rules.iter())
+                .collect();
+
+            window.set_matching_rule(rules);
+            window.init(false, config.use_border)?;
+            window.to_foreground(true)?;
+
+            self.pinned_windows.insert(window.id.into(), window);
+        }
+
+        Ok(())
+    }
+
     pub fn toggle_floating(&mut self) -> SystemResult {
         let config = self.config.clone();
 
         let window =
             NativeWindow::get_foreground_window().expect("Failed to get foreground window");
         let current_workspace_id = self.workspace_id;
+        let is_pinned = self.pinned_windows.contains_key(&window.id.into());
         let grid = self.find_grid_containing_window(window.id);
 
         if let Some(grid) = grid {
@@ -700,13 +799,13 @@ impl AppState {
             if grid.id == current_workspace_id {
                 if let Some(mut w) = grid.remove_by_window_id(window.id) {
                     debug!("Unmanaging window '{}' | {}", w.title, w.id);
-                    w.cleanup();
+                    w.cleanup()?;
                     if let Some(d) = self.find_grid_display(current_workspace_id) {
-                        d.refresh_grid(&config);
+                        d.refresh_grid(&config)?;
                     }
                 }
             }
-        } else {
+        } else if !is_pinned {
             self.event_channel
                 .sender
                 .clone()
@@ -959,6 +1058,23 @@ impl AppState {
 
     pub fn get_grid_by_id(&self, id: i32) -> Option<&TileGrid> {
         self.get_grids().into_iter().find(|g| g.id == id)
+    }
+
+    pub fn load_pinned(&mut self, pinned_windows: Vec::<i32>) -> SystemResult {
+        for pinned_id in pinned_windows {
+            self.pin_window(pinned_id)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn store_pinned(&self) {
+        let window_ids = self.pinned_windows
+                             .keys()
+                             .collect::<Vec::<_>>();
+        let pinned_visible = self.pinned_windows.values().any(|w| w.is_visible());
+
+        Store::save_pinned(window_ids, pinned_visible);
     }
 }
 

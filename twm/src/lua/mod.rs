@@ -652,6 +652,13 @@ fn setup_nog_global(state_arc: Arc<Mutex<AppState>>, rt: &LuaRuntime) {
         });
 
         let state = state_arc.clone();
+        def_fn!(lua, nog_tbl, "toggle_view_pinned", move |_, (): ()| {
+            state.lock()
+                 .toggle_view_pinned()
+                 .map_err(|e| LuaError::RuntimeError(e.to_string()))
+        });
+
+        let state = state_arc.clone();
         def_fn!(lua, nog_tbl, "is_ws_focused", move |lua, ws_id: Value| {
             validate!(lua, { ws_id: i32 });
             Ok(state.lock().workspace_id == ws_id)
@@ -858,6 +865,7 @@ fn load_window_functions(state_arc: Arc<Mutex<AppState>>, rt: &LuaRuntime) -> ml
 
         l_def_ffi_fn!("minimize", minimize_window);
         l_def_ffi_fn!("toggle_floating", toggle_floating);
+        l_def_ffi_fn!("toggle_pin", toggle_pin);
         l_def_ffi_fn!("ignore", ignore_window);
         l_def_ffi_fn!("close", close_window);
         l_def_ffi_fn!("move_to_ws", move_window_to_workspace, ws_id: i32);

@@ -4,6 +4,8 @@ use regex::Regex;
 pub enum Action {
     /// Forces nog to manage the window
     Manage,
+    /// Forces nog to pin the window
+    Pin,
     /// Nog will check the other rules to see whether to manage the window
     Validate,
     /// Forces nog to not manage the window
@@ -14,6 +16,7 @@ impl std::fmt::Display for Action {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(f, "{}", match self {
             Self::Manage => "manage",
+            Self::Pin=> "pin",
             Self::Validate => "validate",
             Self::Ignore => "ignore",
         })
@@ -25,6 +28,7 @@ impl std::str::FromStr for Action {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s {
             "manage" => Self::Manage,
+            "pin" => Self::Pin,
             "validate" => Self::Validate,
             "ignore" => Self::Ignore,
             x => return Err(format!("{} is not a valid action for a rule", x))
